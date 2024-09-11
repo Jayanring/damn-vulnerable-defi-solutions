@@ -1,3 +1,26 @@
+# Challenges
+
+**17 / 18 solved**. Except `Curvy Puppet`.
+
+1. Unstoppable
+2. Naive receiver
+3. Truster
+4. Side Entrance
+5. The Rewarder
+6. Selfie
+7. Compromised
+8. Puppet
+9.  Puppet V2
+9.  Free Rider
+10. Backdoor
+11. Climber
+12. Wallet Mining
+13. Puppet V3
+14. ABI Smuggling
+15. Shards
+16. Curvy Puppet
+17. Withdrawal
+
 # Damn Vulnerable DeFi
 
 Damn Vulnerable DeFi is _the_ smart contract security playground for developers, security researchers and educators.

